@@ -1,0 +1,114 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: nexus-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: nexus_forge
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: nexus-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+  neo4j:
+    image: neo4j:5.18.0
+    container_name: nexus-neo4j
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/password123
+    volumes:
+      - neo4j_data:/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: nexus-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v23.3.10
+    container_name: nexus-redpanda
+    command:
+      - redpanda start
+      - --smp 1
+      - --overprovisioned
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --pandaproxy-addr 0.0.0.0:8082
+      - --advertise-pandaproxy-addr localhost:8082
+      - --schema-registry-addr 0.0.0.0:8081
+      - --rpc-addr 0.0.0.0:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --mode dev-container
+    ports:
+      - "9092:9092"
+      - "19092:19092"
+      - "8081:8081"
+      - "8082:8082"
+    restart: unless-stopped
+
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:v2.4.3
+    container_name: nexus-redpanda-console
+    entrypoint: /bin/sh -c "echo \"$$CONSOLE_CONFIG_FILE\" > /tmp/config.yml; /app/console --config.filepath=/tmp/config.yml"
+    ports:
+      - "8085:8080"
+    environment:
+      CONSOLE_CONFIG_FILE: |
+        kafka:
+          brokers: ["redpanda:9092"]
+        redpanda:
+          adminApi:
+            enabled: true
+            urls: ["http://redpanda:9644"]
+    depends_on:
+      - redpanda
+    restart: unless-stopped
+
+  airflow:
+    image: apache/airflow:2.9.1-python3.11
+    container_name: nexus-airflow
+    ports:
+      - "8080:8080"
+    environment:
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./config:/opt/airflow/config
+      - ./data_landing:/opt/airflow/data_landing
+    command: standalone
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  minio_data:
+  neo4j_data:
+  redis_data:
+
